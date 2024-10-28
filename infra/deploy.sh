@@ -19,6 +19,11 @@ RESOURCE_BASE_NAME=""
 REPORTERS=""
 GRAPHRAG_COGNITIVE_SERVICES_ENDPOINT=""
 CONTAINER_REGISTRY_NAME=""
+DEPLOY_PRIVATE_DNS_ZONES=""
+EXISTING_VNET_NAME=""
+EXISTING_VNET_RESOURCE_GROUP_NAME=""
+APIM_SUBNET_ADDRESS_RANGE=""
+AKS_SUBNET_ADDRESS_RANGE=""
 
 requiredParams=(
     LOCATION
@@ -252,6 +257,22 @@ populateOptionalParams () {
         GRAPHRAG_IMAGE="graphrag:backend"
         printf "\tsetting GRAPHRAG_IMAGE=$GRAPHRAG_IMAGE\n"
     fi
+    if [ -z "$DEPLOY_PRIVATE_DNS_ZONES" ]; then
+        DEPLOY_PRIVATE_DNS_ZONES=true
+        printf "\tsetting DEPLOY_PRIVATE_DNS_ZONES=$DEPLOY_PRIVATE_DNS_ZONES\n"
+    fi
+    if [ ! -z "$EXISTING_VNET_NAME" ]; then
+        printf "\tsetting EXISTING_VNET_NAME=$EXISTING_VNET_NAME\n"
+    fi
+    if [ ! -z "$EXISTING_VNET_RESOURCE_GROUP_NAME" ]; then
+        printf "\tsetting EXISTING_VNET_RESOURCE_GROUP_NAME=$EXISTING_VNET_RESOURCE_GROUP_NAME\n"
+    fi
+        if [ ! -z "$APIM_SUBNET_ADDRESS_RANGE" ]; then
+        printf "\tsetting APIM_SUBNET_ADDRESS_RANGE=$APIM_SUBNET_ADDRESS_RANGE\n"
+    fi
+        if [ ! -z "$AKS_SUBNET_ADDRESS_RANGE" ]; then
+        printf "\tsetting AKS_SUBNET_ADDRESS_RANGE=$AKS_SUBNET_ADDRESS_RANGE\n"
+    fi
     printf "Done.\n"
 }
 
@@ -342,6 +363,11 @@ deployAzureResources () {
         --parameters "publisherEmail=$PUBLISHER_EMAIL" \
         --parameters "enablePrivateEndpoints=$ENABLE_PRIVATE_ENDPOINTS" \
         --parameters "acrName=$CONTAINER_REGISTRY_NAME" \
+        --parameters "deployPrivateDnsZones=$DEPLOY_PRIVATE_DNS_ZONES" \
+        --parameters "existingVnetName=$EXISTING_VNET_NAME" \
+        --parameters "existingVnetResourceGroupName=$EXISTING_VNET_RESOURCE_GROUP_NAME" \
+        --parameters "apimSubnetAddressRange=$APIM_SUBNET_ADDRESS_RANGE" \
+        --parameters "aksSubnetAddressRange=$AKS_SUBNET_ADDRESS_RANGE" \
         --output json)
     exitIfCommandFailed $? "Error deploying Azure resources..."
     AZURE_OUTPUTS=$(jq -r .properties.outputs <<< $AZURE_DEPLOY_RESULTS)
@@ -386,7 +412,7 @@ checkSKUQuotas() {
     local dsv5_currVal=$(jq -r .currentValue <<< $dsv5_usage_report)
     local dsv5_reqVal=$(expr $dsv5_currVal + 12)
     exitIfThresholdExceeded $dsv5_reqVal $dsv5_limit "Not enough Standard DSv5 Family vCPU quota for deployment."
-    
+
     # Check quota for Standard ESv5 Family vCPUs
     local esv5_usage_report=$(jq -c '.[] | select(.localName | contains("Standard ESv5 Family vCPUs"))' <<< $vm_usage_report)
     local esv5_limit=$(jq -r .limit <<< $esv5_usage_report)

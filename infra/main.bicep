@@ -43,6 +43,21 @@ param aksNamespace string = 'graphrag'
 @description('Public key to allow access to AKS Linux nodes.')
 param aksSshRsaPublicKey string
 
+@description('Name of an existing virtual network. If not provided, a new vNet will be created.')
+param existingVnetName string = ''
+
+@description('Resource Group of an existing virtual network. If not provided, a new vNet will be created.')
+param existingVnetResourceGroupName string = ''
+
+@description('IP address range for subnet to host APIM. Only required when specifying an existing vNet.')
+param apimSubnetAddressRange string = '10.0.0.0/16'
+
+@description('IP address range for subnet to host AKS. Only required when specifying an existing vNet.')
+param aksSubnetAddressRange string = '10.1.0.0/16'
+
+@description('Whether to deploy private DNS zones.')
+param deployPrivateDnsZones bool = true
+
 @description('Whether to enable private endpoints.')
 param enablePrivateEndpoints bool = true
 
@@ -64,6 +79,7 @@ var tags = { 'azd-env-name': graphRagName }
 var workloadIdentityName = '${abbrs.managedIdentityUserAssignedIdentities}${resourceBaseNameFinal}'
 var aksServiceAccountName = '${aksNamespace}-workload-sa'
 var workloadIdentitySubject = 'system:serviceaccount:${aksNamespace}:${aksServiceAccountName}'
+var deployToExistingVnet = (!empty(existingVnetName) && !empty(existingVnetResourceGroupName)) ? true : false
 @description('Role definitions for various roles that will be assigned at deployment time. Learn more: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles')
 var roles = {
   storageBlobDataContributor: resourceId(
@@ -110,15 +126,28 @@ module log 'core/log-analytics/log.bicep' = {
   }
 }
 
-module nsg 'core/vnet/nsg.bicep' = {
-  name: 'nsg'
+module nsgApim 'core/vnet/nsg.bicep' = {
+  name: 'nsgApim'
   params: {
-    nsgName: '${abbrs.networkNetworkSecurityGroups}${resourceBaseNameFinal}'
+    nsgName: '${abbrs.networkNetworkSecurityGroups}${resourceBaseNameFinal}Apim'
     location: location
   }
 }
 
-resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
+module nsgAks 'core/vnet/nsg.bicep' = {
+  name: 'nsgAks'
+  params: {
+    nsgName: '${abbrs.networkNetworkSecurityGroups}${resourceBaseNameFinal}Aks'
+    location: location
+  }
+}
+
+resource existingVnet 'Microsoft.Network/virtualNetworks@2024-01-01' existing = if (deployToExistingVnet) {
+  name: existingVnetName
+  scope: resourceGroup(existingVnetResourceGroupName)
+}
+
+resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = if (!deployToExistingVnet) {
   name: '${abbrs.networkVirtualNetworks}${resourceBaseNameFinal}'
   location: location
   properties: {
@@ -127,42 +156,51 @@ resource vnet 'Microsoft.Network/virtualNetworks@2024-01-01' = {
         '10.0.0.0/8'
       ]
     }
-    subnets: [
+  }
+}
+
+var vnetName = !empty(existingVnetName) && !empty(existingVnetResourceGroupName) ? existingVnet.name : vnet.name
+
+module subnetApim 'core/vnet/subnet.bicep' = {
+  name: 'subnetApim'
+  scope: deployToExistingVnet ? resourceGroup(existingVnetResourceGroupName) : resourceGroup()
+  params: {
+    subnetName: '${abbrs.networkVirtualNetworksSubnets}apim'
+    virtualNetworkName: vnetName
+    addressPrefix: apimSubnetAddressRange
+    nsgId: nsgApim.outputs.id
+    delegations: (apimTier=='Developer') ? [] : [
       {
-        name: '${abbrs.networkVirtualNetworksSubnets}apim'
+        name: 'Microsoft.Web/serverFarms'
         properties: {
-          addressPrefix: '10.0.0.0/16'
-          networkSecurityGroup: {
-            id: nsg.outputs.id
-          }
-          delegations: (apimTier=='Developer') ? [] : [
-            {
-              name: 'Microsoft.Web/serverFarms'
-              properties: {
-                serviceName: 'Microsoft.Web/serverFarms'
-              }
-            }
-          ]
-        }
-      }
-      {
-        name: '${abbrs.networkVirtualNetworksSubnets}aks'
-        properties: {
-          addressPrefix: '10.1.0.0/16'
-          serviceEndpoints: [
-            {
-              service: 'Microsoft.Storage'
-            }
-            {
-              service: 'Microsoft.Sql'
-            }
-            {
-              service: 'Microsoft.EventHub'
-            }
-          ]
+          serviceName: 'Microsoft.Web/serverFarms'
         }
       }
     ]
+    privateEndpointNetworkPolicies: 'Enabled'
+  }
+}
+
+module subnetAks 'core/vnet/subnet.bicep' = {
+  name: 'subnetAks'
+  scope: deployToExistingVnet ? resourceGroup() : resourceGroup(existingVnetResourceGroupName)
+  params: {
+    subnetName: '${abbrs.networkVirtualNetworksSubnets}aks'
+    virtualNetworkName: vnetName
+    addressPrefix: aksSubnetAddressRange
+    nsgId: nsgAks.outputs.id
+    serviceEndpoints: [
+      {
+        service: 'Microsoft.Storage'
+      }
+      {
+        service: 'Microsoft.Sql'
+      }
+      {
+        service: 'Microsoft.EventHub'
+      }
+    ]
+    privateEndpointNetworkPolicies: 'Enabled'
   }
 }
 
@@ -190,8 +228,8 @@ module aks 'core/aks/aks.bicep' = {
     graphragIndexingVMSize: 'standard_e8s_v5'   // 8 vcpus, 64 GB memory
     sshRSAPublicKey: aksSshRsaPublicKey
     logAnalyticsWorkspaceId: log.outputs.id
-    subnetId: vnet.properties.subnets[1].id // aks subnet
-    privateDnsZoneName: privateDnsZone.outputs.name
+    subnetId: subnetAks.outputs.id // aks subnet
+    privateDnsZoneName: deployPrivateDnsZones ? privateDnsZone.outputs.name : ''
     ingressRoleAssignments: [
       {
         principalType: 'ServicePrincipal'
@@ -307,7 +345,7 @@ module workloadIdentity 'core/identity/identity.bicep' = {
   }
 }
 
-module privateDnsZone 'core/vnet/private-dns-zone.bicep' = {
+module privateDnsZone 'core/vnet/private-dns-zone.bicep' = if (deployPrivateDnsZones) {
   name: 'private-dns-zone'
   params: {
     name: dnsDomain
@@ -317,7 +355,7 @@ module privateDnsZone 'core/vnet/private-dns-zone.bicep' = {
   }
 }
 
-module privatelinkPrivateDns 'core/vnet/privatelink-private-dns-zones.bicep' = if (enablePrivateEndpoints) {
+module privatelinkPrivateDns 'core/vnet/privatelink-private-dns-zones.bicep' = if (enablePrivateEndpoints && deployPrivateDnsZones) {
   name: 'privatelink-private-dns-zones'
   params: {
     linkedVnetIds: [
@@ -345,7 +383,7 @@ module cosmosDbPrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (enablePr
     privateLinkServiceId: cosmosdb.outputs.id
     subnetId: vnet.properties.subnets[1].id // aks subnet
     groupId: 'Sql'
-    privateDnsZoneConfigs: enablePrivateEndpoints ? privatelinkPrivateDns.outputs.cosmosDbPrivateDnsZoneConfigs : []
+    privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.cosmosDbPrivateDnsZoneConfigs : []
   }
 }
 
@@ -357,7 +395,7 @@ module blobStoragePrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (enabl
     privateLinkServiceId: storage.outputs.id
     subnetId: vnet.properties.subnets[1].id // aks subnet
     groupId: 'blob'
-    privateDnsZoneConfigs: enablePrivateEndpoints ? privatelinkPrivateDns.outputs.blobStoragePrivateDnsZoneConfigs : []
+    privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.blobStoragePrivateDnsZoneConfigs : []
   }
 }
 
@@ -369,7 +407,7 @@ module aiSearchPrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (enablePr
     privateLinkServiceId: aiSearch.outputs.id
     subnetId: vnet.properties.subnets[1].id // aks subnet
     groupId: 'searchService'
-    privateDnsZoneConfigs: enablePrivateEndpoints ? privatelinkPrivateDns.outputs.aiSearchPrivateDnsZoneConfigs : []
+    privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.aiSearchPrivateDnsZoneConfigs : []
   }
 }
 
@@ -381,7 +419,7 @@ module privateLinkScopePrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (
     privateLinkServiceId: enablePrivateEndpoints ? azureMonitorPrivateLinkScope.outputs.id : ''
     subnetId: vnet.properties.subnets[1].id // aks subnet
     groupId: 'azuremonitor'
-    privateDnsZoneConfigs: enablePrivateEndpoints ? privatelinkPrivateDns.outputs.azureMonitorPrivateDnsZoneConfigs : []
+    privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.azureMonitorPrivateDnsZoneConfigs : []
   }
 }
 
@@ -408,7 +446,7 @@ output azure_graphrag_url string = graphRagUrl
 output azure_workload_identity_client_id string = workloadIdentity.outputs.clientId
 output azure_workload_identity_principal_id string = workloadIdentity.outputs.principalId
 output azure_workload_identity_name string = workloadIdentity.outputs.name
-output azure_private_dns_zones array = enablePrivateEndpoints ? union(
+output azure_private_dns_zones array = enablePrivateEndpoints && deployPrivateDnsZones ? union(
   privatelinkPrivateDns.outputs.privateDnsZones,
   [privateDnsZone.outputs.name]
 ) : []

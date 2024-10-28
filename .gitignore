@@ -167,3 +167,5 @@ main.parameters.json
 **/Chart.lock
 
 .history
+infra/deploy.parameters copy.json
+.devcontainer/devcontainer.json

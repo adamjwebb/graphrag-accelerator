@@ -19,8 +19,7 @@
 		"PATH": "${containerEnv:PATH}",
 		// Add src folder to PYTHONPATH so that we can import modules that
 		// are in the source dir
-		"PYTHONPATH": "/graphrag-accelerator/backend/:$PATH",
-		"AZURE_CLI_DISABLE_CONNECTION_VERIFICATION": "1"
+		"PYTHONPATH": "/graphrag-accelerator/backend/:$PATH"
 	},
 	"mounts": [
 		// NOTE: we reference both HOME and USERPROFILE environment variables to simultaneously support both Windows and Unix environments
