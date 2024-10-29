@@ -24,6 +24,7 @@ EXISTING_VNET_NAME=""
 EXISTING_VNET_RESOURCE_GROUP_NAME=""
 APIM_SUBNET_ADDRESS_RANGE=""
 AKS_SUBNET_ADDRESS_RANGE=""
+PRIVATE_DEPLOYMENT=""
 
 requiredParams=(
     LOCATION
@@ -273,6 +274,10 @@ populateOptionalParams () {
         if [ ! -z "$AKS_SUBNET_ADDRESS_RANGE" ]; then
         printf "\tsetting AKS_SUBNET_ADDRESS_RANGE=$AKS_SUBNET_ADDRESS_RANGE\n"
     fi
+    if [ -z "$PRIVATE_DEPLOYMENT" ]; then
+        PRIVATE_DEPLOYMENT=false
+        printf "\tsetting PRIVATE_DEPLOYMENT=$PRIVATE_DEPLOYMENT\n"
+    fi
     printf "Done.\n"
 }
 
@@ -368,6 +373,7 @@ deployAzureResources () {
         --parameters "existingVnetResourceGroupName=$EXISTING_VNET_RESOURCE_GROUP_NAME" \
         --parameters "apimSubnetAddressRange=$APIM_SUBNET_ADDRESS_RANGE" \
         --parameters "aksSubnetAddressRange=$AKS_SUBNET_ADDRESS_RANGE" \
+        --parameters "privateDeployment=$PRIVATE_DEPLOYMENT" \
         --output json)
     exitIfCommandFailed $? "Error deploying Azure resources..."
     AZURE_OUTPUTS=$(jq -r .properties.outputs <<< $AZURE_DEPLOY_RESULTS)

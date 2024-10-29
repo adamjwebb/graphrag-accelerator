@@ -5,7 +5,7 @@
 param name string
 
 @description('The name of the virtual networks the DNS zone should be associated with.')
-param vnetNames string[]
+param vnetObjects object[]
 
 
 resource dnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
@@ -15,14 +15,15 @@ resource dnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
 }
 
 resource vnets 'Microsoft.Network/virtualNetworks@2024-01-01' existing = [
-  for vnetName in vnetNames: {
-    name: vnetName
+  for vnet in vnetObjects: {
+    name: vnet.name
+    scope: resourceGroup(vnet.resourceGroup)
   }
 ]
 
 resource dnsZoneLinks 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = [
-  for (vnetName, index) in vnetNames: {
-    name: vnetName
+  for (vnetName, index) in vnetObjects: {
+    name: vnets[index].name
     location: 'global'
     parent: dnsZone
     properties: {

@@ -4,6 +4,9 @@ param registryName string
 @description('The location of the Container Registry resource.')
 param location string = resourceGroup().location
 
+@allowed([ 'Enabled', 'Disabled' ])
+param publicNetworkAccess string = 'Disabled'
+
 @description('Array of objects with fields principalId, principalType, roleDefinitionId')
 param roleAssignments array = []
 
@@ -11,7 +14,7 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = 
   name: registryName
   location: location
   sku: {
-    name: 'Standard'
+    name: publicNetworkAccess == 'Disabled' ? 'Premium' : 'Standard'
   }
   properties: {
     adminUserEnabled: false
@@ -19,7 +22,7 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = 
       status: 'disabled'
     }
     dataEndpointEnabled: false
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: publicNetworkAccess
     networkRuleBypassOptions: 'AzureServices'
     zoneRedundancy: 'Disabled'
     anonymousPullEnabled: false

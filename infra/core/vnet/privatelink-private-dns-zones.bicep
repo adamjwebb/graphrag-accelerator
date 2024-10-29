@@ -7,11 +7,12 @@ param linkedVnetIds array
 var aiSearchPrivateDnsZoneName = 'privatelink.search.windows.net'
 var blobStoragePrivateDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
 var cosmosDbPrivateDnsZoneName = 'privatelink.documents.azure.com'
+var acrPrivateDnsZoneName = 'privatelink.azurecr.io'
 var storagePrivateDnsZoneNames = [blobStoragePrivateDnsZoneName]
 var privateDnsZoneData = loadJsonContent('private-dns-zone-groups.json')
 var cloudName = toLower(environment().name)
 var azureMonitorPrivateDnsZones = privateDnsZoneData[cloudName].azureMonitor
-var privateDnsZones = union(azureMonitorPrivateDnsZones, storagePrivateDnsZoneNames, [cosmosDbPrivateDnsZoneName], [aiSearchPrivateDnsZoneName])
+var privateDnsZones = union(azureMonitorPrivateDnsZones, storagePrivateDnsZoneNames, [cosmosDbPrivateDnsZoneName], [aiSearchPrivateDnsZoneName], [acrPrivateDnsZoneName])
 
 
 resource privateDnsZoneResources 'Microsoft.Network/privateDnsZones@2020-06-01' = [
@@ -57,6 +58,16 @@ output cosmosDbPrivateDnsZoneConfigs array = [
     properties: {
       #disable-next-line use-resource-id-functions
       privateDnsZoneId: privateDnsZoneResources[indexOf(privateDnsZones, cosmosDbPrivateDnsZoneName)].id
+    }
+  }
+]
+
+output acrPrivateDnsZoneConfigs array = [
+  {
+    name: privateDnsZoneResources[indexOf(privateDnsZones, acrPrivateDnsZoneName)].name
+    properties: {
+      #disable-next-line use-resource-id-functions
+      privateDnsZoneId: privateDnsZoneResources[indexOf(privateDnsZones, acrPrivateDnsZoneName)].id
     }
   }
 ]

@@ -52,6 +52,8 @@ param sshRSAPublicKey string
 @description('Enable encryption at host')
 param enableEncryptionAtHost bool = false
 
+param privateCluster bool = false
+
 param subnetId string
 
 param privateDnsZoneName string
@@ -59,21 +61,22 @@ param privateDnsZoneName string
 @description('Array of objects with fields principalType, roleDefinitionId')
 param ingressRoleAssignments array = []
 
-@description('Array of objects with fields principalType, roleDefinitionId')
+@description('Array of objects with fields principalType, roleDefinitionId, scope')
 param systemRoleAssignments array = []
 
 
-resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' existing = {
+resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' existing =  if (empty(privateDnsZoneName)) {
   name: privateDnsZoneName
 }
 
-resource aks 'Microsoft.ContainerService/managedClusters@2024-02-01' = {
+resource aks 'Microsoft.ContainerService/managedClusters@2024-06-02-preview' = {
   name: clusterName
   location: location
   identity: {
     type: 'SystemAssigned'
   }
   properties: {
+    kubernetesVersion: '1.30.0'
     enableRBAC: true
     dnsPrefix: !empty(dnsPrefix) ? dnsPrefix : toLower(clusterName)
     addonProfiles: {
@@ -107,11 +110,14 @@ resource aks 'Microsoft.ContainerService/managedClusters@2024-02-01' = {
       expander: 'least-waste'
     }
     ingressProfile: {
-      webAppRouting: {
+      webAppRouting:  {
         enabled: true
-        dnsZoneResourceIds: [
+        dnsZoneResourceIds: empty(privateDnsZoneName) ? [] : [
           privateDnsZone.id
         ]
+        nginx: !privateCluster ? {} : {
+          defaultIngressControllerType: 'Internal'
+      }
       }
     }
     linuxProfile: {
@@ -136,6 +142,10 @@ resource aks 'Microsoft.ContainerService/managedClusters@2024-02-01' = {
       workloadIdentity: {
         enabled: true
       }
+    }
+    apiServerAccessProfile: {
+      enablePrivateCluster: privateCluster
+      enablePrivateClusterPublicFQDN: false
     }
   }
 
@@ -230,7 +240,7 @@ resource aksManagedNodeOSUpgradeSchedule 'Microsoft.ContainerService/managedClus
 
 // role assignment to ingress identity
 resource webAppRoutingPrivateDnsContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
-  for role in ingressRoleAssignments: {
+  for role in ingressRoleAssignments: if(!empty(privateDnsZoneName)) {
     name: guid('${role.roleDefinitionId}-${privateDnsZone.id}')
     scope: privateDnsZone
     properties: {
@@ -242,11 +252,11 @@ resource webAppRoutingPrivateDnsContributor 'Microsoft.Authorization/roleAssignm
 ]
 
 // role assignment to AKS system identity
-resource systemRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+module systemRoleAssignment '../role/roleassignment.bicep' = [
   for role in systemRoleAssignments: {
-    name: guid('${role.roleDefinitionId}-${aks.id}')
-    scope: resourceGroup()
-    properties: {
+    name: guid('${role.roleDefinitionId}-${aks.id}${role.scope}')
+    scope: resourceGroup(role.scope)
+    params: {
       principalId: aks.identity.principalId
       principalType: role.principalType
       roleDefinitionId: role.roleDefinitionId
@@ -257,6 +267,6 @@ resource systemRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-0
 output name string = aks.name
 output id string = aks.id
 output managedResourceGroup string = aks.properties.nodeResourceGroup
-output controlPlaneFqdn string = aks.properties.fqdn
+output controlPlaneFqdn string = privateCluster ? aks.properties.privateFQDN : aks.properties.fqdn
 output kubeletPrincipalId string = aks.properties.identityProfile.kubeletidentity.objectId
 output issuer string = aks.properties.oidcIssuerProfile.issuerURL

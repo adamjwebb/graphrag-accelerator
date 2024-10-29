@@ -58,6 +58,9 @@ param aksSubnetAddressRange string = '10.1.0.0/16'
 @description('Whether to deploy private DNS zones.')
 param deployPrivateDnsZones bool = true
 
+@description('Whether to deploy a private environment with no public endpoints.')
+param privateDeployment bool = false
+
 @description('Whether to enable private endpoints.')
 param enablePrivateEndpoints bool = true
 
@@ -163,7 +166,7 @@ var vnetName = !empty(existingVnetName) && !empty(existingVnetResourceGroupName)
 
 module subnetApim 'core/vnet/subnet.bicep' = {
   name: 'subnetApim'
-  scope: deployToExistingVnet ? resourceGroup(existingVnetResourceGroupName) : resourceGroup()
+  scope: resourceGroup(deployToExistingVnet ? existingVnetResourceGroupName : '')
   params: {
     subnetName: '${abbrs.networkVirtualNetworksSubnets}apim'
     virtualNetworkName: vnetName
@@ -183,12 +186,12 @@ module subnetApim 'core/vnet/subnet.bicep' = {
 
 module subnetAks 'core/vnet/subnet.bicep' = {
   name: 'subnetAks'
-  scope: deployToExistingVnet ? resourceGroup() : resourceGroup(existingVnetResourceGroupName)
+  scope: resourceGroup(deployToExistingVnet ? existingVnetResourceGroupName : '')
   params: {
     subnetName: '${abbrs.networkVirtualNetworksSubnets}aks'
     virtualNetworkName: vnetName
     addressPrefix: aksSubnetAddressRange
-    nsgId: nsgAks.outputs.id
+    nsgId: ''
     serviceEndpoints: [
       {
         service: 'Microsoft.Storage'
@@ -209,6 +212,7 @@ module acr 'core/acr/acr.bicep' = {
   params: {
     registryName: !empty(acrName) ? acrName : '${abbrs.containerRegistryRegistries}${resourceBaseNameFinal}'
     location: location
+    publicNetworkAccess: enablePrivateEndpoints ? 'Disabled' : 'Enabled'
     roleAssignments: [
       {
         principalId: aks.outputs.kubeletPrincipalId
@@ -229,6 +233,7 @@ module aks 'core/aks/aks.bicep' = {
     sshRSAPublicKey: aksSshRsaPublicKey
     logAnalyticsWorkspaceId: log.outputs.id
     subnetId: subnetAks.outputs.id // aks subnet
+    privateCluster: privateDeployment ? true : false
     privateDnsZoneName: deployPrivateDnsZones ? privateDnsZone.outputs.name : ''
     ingressRoleAssignments: [
       {
@@ -240,6 +245,7 @@ module aks 'core/aks/aks.bicep' = {
       {
         principalType: 'ServicePrincipal'
         roleDefinitionId: roles.networkContributor
+        scope: existingVnetResourceGroupName
       }
     ]
   }
@@ -318,7 +324,8 @@ module apim 'core/apim/apim.bicep' = {
     publisherEmail: publisherEmail
     publisherName: publisherName
     logAnalyticsWorkspaceId: log.outputs.id
-    subnetId: vnet.properties.subnets[0].id // apim subnet
+    virtualNetworkType: privateDeployment ? 'Internal' : 'External'
+    subnetId: subnetApim.outputs.id // apim subnet
   }
 }
 
@@ -349,17 +356,21 @@ module privateDnsZone 'core/vnet/private-dns-zone.bicep' = if (deployPrivateDnsZ
   name: 'private-dns-zone'
   params: {
     name: dnsDomain
-    vnetNames: [
-      vnet.name
+    vnetObjects: [
+      {
+       name: vnetName
+       resourceGroup: deployToExistingVnet ? existingVnetResourceGroupName : ''
+      }
     ]
   }
 }
 
 module privatelinkPrivateDns 'core/vnet/privatelink-private-dns-zones.bicep' = if (enablePrivateEndpoints && deployPrivateDnsZones) {
   name: 'privatelink-private-dns-zones'
+  scope: resourceGroup(deployToExistingVnet ? existingVnetResourceGroupName : '')
   params: {
     linkedVnetIds: [
-      vnet.id
+      deployToExistingVnet ? existingVnet.id : vnet.id
     ]
   }
 }
@@ -375,13 +386,25 @@ module azureMonitorPrivateLinkScope 'core/monitor/private-link-scope.bicep' = if
   }
 }
 
+module acrPrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (enablePrivateEndpoints) {
+  name: 'acr-private-endpoint'
+  params: {
+    privateEndpointName: '${abbrs.privateEndpoint}acr-${acr.outputs.name}'
+    location: location
+    privateLinkServiceId: acr.outputs.id
+    subnetId: subnetAks.outputs.id // aks subnet
+    groupId: 'registry'
+    privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.acrPrivateDnsZoneConfigs : []
+  }
+}
+
 module cosmosDbPrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (enablePrivateEndpoints) {
   name: 'cosmosDb-private-endpoint'
   params: {
     privateEndpointName: '${abbrs.privateEndpoint}cosmos-${cosmosdb.outputs.name}'
     location: location
     privateLinkServiceId: cosmosdb.outputs.id
-    subnetId: vnet.properties.subnets[1].id // aks subnet
+    subnetId: subnetAks.outputs.id // aks subnet
     groupId: 'Sql'
     privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.cosmosDbPrivateDnsZoneConfigs : []
   }
@@ -393,7 +416,7 @@ module blobStoragePrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (enabl
     privateEndpointName: '${abbrs.privateEndpoint}blob-${storage.outputs.name}'
     location: location
     privateLinkServiceId: storage.outputs.id
-    subnetId: vnet.properties.subnets[1].id // aks subnet
+    subnetId: subnetAks.outputs.id // aks subnet
     groupId: 'blob'
     privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.blobStoragePrivateDnsZoneConfigs : []
   }
@@ -405,7 +428,7 @@ module aiSearchPrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (enablePr
     privateEndpointName: '${abbrs.privateEndpoint}search-${aiSearch.outputs.name}'
     location: location
     privateLinkServiceId: aiSearch.outputs.id
-    subnetId: vnet.properties.subnets[1].id // aks subnet
+    subnetId: subnetAks.outputs.id // aks subnet
     groupId: 'searchService'
     privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.aiSearchPrivateDnsZoneConfigs : []
   }
@@ -417,7 +440,7 @@ module privateLinkScopePrivateEndpoint 'core/vnet/private-endpoint.bicep' = if (
     privateEndpointName: '${abbrs.privateEndpoint}pls-${resourceBaseNameFinal}'
     location: location
     privateLinkServiceId: enablePrivateEndpoints ? azureMonitorPrivateLinkScope.outputs.id : ''
-    subnetId: vnet.properties.subnets[1].id // aks subnet
+    subnetId: subnetAks.outputs.id // aks subnet
     groupId: 'azuremonitor'
     privateDnsZoneConfigs: enablePrivateEndpoints && deployPrivateDnsZones ? privatelinkPrivateDns.outputs.azureMonitorPrivateDnsZoneConfigs : []
   }
@@ -440,13 +463,13 @@ output azure_cosmosdb_id string = cosmosdb.outputs.id
 output azure_app_insights_connection_string string = apim.outputs.appInsightsConnectionString
 output azure_apim_name string = apim.outputs.name
 output azure_apim_gateway_url string = apim.outputs.apimGatewayUrl
-output azure_dns_zone_name string = privateDnsZone.outputs.name
+output azure_dns_zone_name string = deployPrivateDnsZones ? privateDnsZone.outputs.name : ''
 output azure_graphrag_hostname string = graphRagHostname
 output azure_graphrag_url string = graphRagUrl
 output azure_workload_identity_client_id string = workloadIdentity.outputs.clientId
 output azure_workload_identity_principal_id string = workloadIdentity.outputs.principalId
 output azure_workload_identity_name string = workloadIdentity.outputs.name
-output azure_private_dns_zones array = enablePrivateEndpoints && deployPrivateDnsZones ? union(
+output azure_private_dns_zones array = deployPrivateDnsZones ? union(
   privatelinkPrivateDns.outputs.privateDnsZones,
   [privateDnsZone.outputs.name]
 ) : []

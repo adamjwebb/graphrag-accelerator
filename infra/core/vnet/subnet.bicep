@@ -15,9 +15,9 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
   name: subnetName
   properties: {
     addressPrefix: addressPrefix
-    networkSecurityGroup: {
+    networkSecurityGroup: !empty(nsgId) ? {
       id: nsgId
-    }
+    } : null
     delegations: delegations
     privateEndpointNetworkPolicies: privateEndpointNetworkPolicies
     serviceEndpoints: serviceEndpoints

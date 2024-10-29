@@ -58,6 +58,8 @@ param dnsLabelPrefix string = toLower('${publicIpName}-${uniqueString(resourceGr
 @description('The workspace id of the Log Analytics resource.')
 param logAnalyticsWorkspaceId string
 
+param virtualNetworkType string = 'External'
+
 param restoreAPIM bool = false
 param subnetId string
 
@@ -88,7 +90,7 @@ resource apiManagementService 'Microsoft.ApiManagement/service@2023-09-01-previe
     restore: restoreAPIM
     publisherEmail: publisherEmail
     publisherName: publisherName
-    virtualNetworkType: 'External'
+    virtualNetworkType: virtualNetworkType
     publicIpAddressId: publicIp.id
     virtualNetworkConfiguration: {
       subnetResourceId: subnetId
