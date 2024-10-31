@@ -144,7 +144,7 @@ resource aks 'Microsoft.ContainerService/managedClusters@2024-06-02-preview' = {
       }
     }
     apiServerAccessProfile: {
-      enablePrivateCluster: privateCluster
+      enablePrivateCluster: false
       enablePrivateClusterPublicFQDN: false
     }
   }
@@ -267,6 +267,7 @@ module systemRoleAssignment '../role/roleassignment.bicep' = [
 output name string = aks.name
 output id string = aks.id
 output managedResourceGroup string = aks.properties.nodeResourceGroup
-output controlPlaneFqdn string = privateCluster ? aks.properties.privateFQDN : aks.properties.fqdn
+output controlPlaneFqdn string =  aks.properties.fqdn
+// privateCluster ? aks.properties.privateFQDN : aks.properties.fqdn
 output kubeletPrincipalId string = aks.properties.identityProfile.kubeletidentity.objectId
 output issuer string = aks.properties.oidcIssuerProfile.issuerURL

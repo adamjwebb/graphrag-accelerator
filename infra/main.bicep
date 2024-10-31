@@ -411,6 +411,20 @@ module subnetApim 'core/vnet/subnet.bicep' = {
     virtualNetworkName: vnetName
     addressPrefix: apimSubnetAddressRange
     nsgId: nsgApim.outputs.id
+     serviceEndpoints: [
+      {
+        service: 'Microsoft.Storage'
+      }
+      {
+        service: 'Microsoft.Sql'
+      }
+      {
+        service: 'Microsoft.EventHub'
+      }
+      {
+        service: 'Microsoft.KeyVault'
+      }
+    ]
     delegations: (apimTier=='Developer') ? [] : [
       {
         name: 'Microsoft.Web/serverFarms'
