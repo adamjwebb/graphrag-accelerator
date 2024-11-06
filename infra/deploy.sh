@@ -567,8 +567,9 @@ deployDnsRecord () {
 
 deployGraphragAPI () {
     echo "Registering GraphRAG API with APIM..."
-    local apimGatewayUrl=$(jq -r .azure_apim_gateway_url.value <<< $AZURE_OUTPUTS)
-    exitIfValueEmpty "$apimGatewayUrl" "Unable to parse APIM gateway url from Azure outputs, exiting..."
+    #local apimGatewayUrl=$(jq -r .azure_apim_gateway_url.value <<< $AZURE_OUTPUTS)
+    #exitIfValueEmpty "$apimGatewayUrl" "Unable to parse APIM gateway url from Azure outputs, exiting..."
+    local apimGatewayUrl="10.1.1.4"
     local apimName=$(jq -r .azure_apim_name.value <<< $AZURE_OUTPUTS)
     exitIfValueEmpty "$apimName" "Error parsing apim name from azure outputs, exiting..."
     local backendSwaggerUrl="$apimGatewayUrl/manpage/openapi.json"
@@ -648,11 +649,28 @@ deployDockerImageToACR() {
     exitIfValueEmpty "$containerRegistry" "Unable to parse container registry from azure deployment outputs, exiting..."
     echo "Deploying docker image '${GRAPHRAG_IMAGE}' to container registry '${containerRegistry}'..."
     local scriptDir="$( cd -- "$( dirname -- "${BASH_SOURCE[0]:-$0}"; )" &> /dev/null && pwd 2> /dev/null; )";
-    az acr build --only-show-errors \
-        --registry $containerRegistry \
-        --file $scriptDir/../docker/Dockerfile-backend \
-        --image $GRAPHRAG_IMAGE \
-        $scriptDir/../
+   # az acr build --only-show-errors \
+   #     --registry $containerRegistry \
+   #     --file $scriptDir/../docker/Dockerfile-backend \
+   #     --image $GRAPHRAG_IMAGE \
+   #     --identity
+   #     $scriptDir/../
+
+    local acrTaskPrincipalID=$(az acr task show --name graphrag-build-task --registry ${containerRegistry} --output json | jq -r .identity.principalId)
+    exitIfValueEmpty $acrTaskPrincipalID "ACR Task identity principal ID not found"
+
+    local containerRegistryID=$(az acr show --name ${containerRegistry} --output json | jq -r .id)
+    exitIfValueEmpty $containerRegistryID "ACR ID not found"
+
+    az role assignment create --assignee $acrTaskPrincipalID --scope $containerRegistryID --role acrpush > /dev/null
+
+    az acr task credential add \
+    --name graphrag-build-task \
+    --registry $containerRegistry \
+    --login-server $containerRegistry \
+    --use-identity [system]
+
+    az acr task run --name graphrag-build-task --registry $containerRegistry
     exitIfCommandFailed $? "Error deploying docker image, exiting..."
 }
 
@@ -734,7 +752,7 @@ getAksCredentials $RESOURCE_GROUP $AKS_NAME
 installGraphRAGHelmChart
 
 # Import and setup GraphRAG API in APIM
-deployDnsRecord
+# deployDnsRecord
 deployGraphragAPI
 
 if [ $GRANT_DEV_ACCESS -eq 1 ]; then
