@@ -19,7 +19,7 @@ ingress:
   enabled: true
   className: nginx-internal
   createIngressClass: true
-  host: graphrag.graphrag.io
+  #host: graphrag.graphrag.io
   tls: []
   annotations:
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "900"

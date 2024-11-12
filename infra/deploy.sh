@@ -458,8 +458,8 @@ installGraphRAGHelmChart () {
     local cosmosEndpoint=$(jq -r .azure_cosmosdb_endpoint.value <<< $AZURE_OUTPUTS)
     exitIfValueEmpty "$cosmosEndpoint" "Unable to parse CosmosDB endpoint from Azure outputs, exiting..."
 
-    local graphragHostname=$(jq -r .azure_graphrag_hostname.value <<< $AZURE_OUTPUTS)
-    exitIfValueEmpty "$graphragHostname" "Unable to parse graphrag hostname from deployment outputs, exiting..."
+    #local graphragHostname=$(jq -r .azure_graphrag_hostname.value <<< $AZURE_OUTPUTS)
+    #exitIfValueEmpty "$graphragHostname" "Unable to parse graphrag hostname from deployment outputs, exiting..."
 
     local storageAccountBlobUrl=$(jq -r .azure_storage_account_blob_url.value <<< $AZURE_OUTPUTS)
     exitIfValueEmpty "$storageAccountBlobUrl" "Unable to parse storage account blob url from deployment outputs, exiting..."
@@ -534,7 +534,7 @@ waitForGraphragBackend () {
     local available="false"
     printf "Checking for GraphRAG API availability..."
     for ((i=0;i < $maxTries; i++)); do
-        az rest --method get --url $backendSwaggerUrl > /dev/null 2>&1
+        az rest --method get --url $backendSwaggerUrl # > /dev/null 2>&1
         if [ $? -eq 0 ]; then
             available="true"
             break
@@ -567,16 +567,20 @@ deployDnsRecord () {
 
 deployGraphragAPI () {
     echo "Registering GraphRAG API with APIM..."
-    #local apimGatewayUrl=$(jq -r .azure_apim_gateway_url.value <<< $AZURE_OUTPUTS)
-    #exitIfValueEmpty "$apimGatewayUrl" "Unable to parse APIM gateway url from Azure outputs, exiting..."
-    local apimGatewayUrl="10.1.1.4"
+    local apimGatewayUrl=$(jq -r .azure_apim_gateway_url.value <<< $AZURE_OUTPUTS)
+    exitIfValueEmpty "$apimGatewayUrl" "Unable to parse APIM gateway url from Azure outputs, exiting..."
     local apimName=$(jq -r .azure_apim_name.value <<< $AZURE_OUTPUTS)
     exitIfValueEmpty "$apimName" "Error parsing apim name from azure outputs, exiting..."
-    local backendSwaggerUrl="$apimGatewayUrl/manpage/openapi.json"
-    local graphragUrl=$(jq -r .azure_graphrag_url.value <<< $AZURE_OUTPUTS)
+    #local backendSwaggerUrl="$apimGatewayUrl/manpage/openapi.json"
+    #echo "$backendSwaggerUrl"
+    #local graphragUrl=$(jq -r .azure_graphrag_url.value <<< $AZURE_OUTPUTS)
+    local graphragIP=$(kubectl get ingress --namespace graphrag graphrag -o json | jq -r .status.loadBalancer.ingress[0].ip)
+    local graphragUrl="http://$graphragIP"
+    echo "$graphragUrl"
     exitIfValueEmpty "$graphragUrl" "Error parsing GraphRAG URL from azure outputs, exiting..."
+    local backendSwaggerUrl="$graphragUrl/manpage/openapi.json"
 
-    waitForGraphragBackend $backendSwaggerUrl
+   # waitForGraphragBackend $backendSwaggerUrl
 
     # download the openapi spec from the backend and load it into APIM
     az rest --only-show-errors --method get --url $backendSwaggerUrl -o json > core/apim/graphrag-openapi.json
