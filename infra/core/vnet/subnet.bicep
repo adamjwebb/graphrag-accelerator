@@ -2,6 +2,7 @@ param subnetName string
 param virtualNetworkName string
 param addressPrefix string
 param nsgId string
+param routeTable object = {}
 param delegations array = []
 param privateEndpointNetworkPolicies string = ''
 param serviceEndpoints array = []
@@ -21,6 +22,7 @@ resource subnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
     delegations: delegations
     privateEndpointNetworkPolicies: privateEndpointNetworkPolicies
     serviceEndpoints: serviceEndpoints
+    routeTable: empty(routeTable) ? null : routeTable
   }
 }
 

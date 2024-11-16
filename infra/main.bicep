@@ -129,6 +129,20 @@ module log 'core/log-analytics/log.bicep' = {
   }
 }
 
+module routeTableApim 'core/vnet/route-table.bicep' = {
+  name: 'routeTableApim'
+  params: {
+    routeTableName: '${abbrs.networkRouteTables}${resourceBaseNameFinal}'
+    routes: [
+      {
+        name: 'apimManagementEndPointInternet'
+        addressPrefix: 'ApiManagement'
+        nextHopType: 'Internet'
+      }
+    ]
+  }
+}
+
 module nsgApim 'core/vnet/nsg.bicep' = {
   name: 'nsgApim'
   params: {
@@ -411,6 +425,9 @@ module subnetApim 'core/vnet/subnet.bicep' = {
     virtualNetworkName: vnetName
     addressPrefix: apimSubnetAddressRange
     nsgId: nsgApim.outputs.id
+    routeTable: {
+      id: routeTableApim.outputs.routeTableId
+    }
      serviceEndpoints: [
       {
         service: 'Microsoft.Storage'
